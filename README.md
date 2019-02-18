@@ -1,32 +1,68 @@
-# aws-waf-security-automations
+# AWS WAF Security Automations
+A solution that contains all AWS WAF samples developed so far - waf-reactive-blacklist, waf-bad-bot-blocking, waf-block-bad-behaving and waf-reputation-lists.
 
-The [AWS WAF Security Automations](https://aws.amazon.com/answers/security/aws-waf-security-automations/) is a simple AWS-provided solution that helps you provision the AWS WAF Security Automations stack without worrying about creating and configuring the underlying AWS infrastructure. WARNING: This template creates an AWS Lambda function, an AWS WAF Web ACL, an Amazon S3 bucket, and an Amazon CloudWatch custom metric. You will be billed for the AWS resources used if you create a stack from this template.
+For the full solution overview visit [AWS WAF Security Automations](https://aws.amazon.com/answers/security/aws-waf-security-automations/).
 
-Source code for the AWS solution "WAS WAF Security Automations".
+## File Structure
+This project consists of microservices that facilitate the functional areas of the solution. These microservices are deployed to a serverless environment in AWS Lambda.
 
-## Cloudformation templates
+```
+|-deployment/ [folder containing templates and build scripts]
+|-source/
+  |-access-handler/ [microservice for processing bad bots honeypot endpoint access. This AWS Lambda function intercepts the suspicious request and adds the source IP address to the AWS WAF block list]
+  |-custom-resource/ [custom helper for CloudFormation deployment template]
+  |-log-parser/ [microservice for processing access logs searching for suspicious behavior and add the corresponding source IP addresses to an AWS WAF block list]
+  |-reputation-lists-parser/ [microservice for processing third-party IP reputation lists and add malicious IP addresses to an AWS WAF block list]
+```
 
-- cform/ec2-scheduler.template
+## Getting Started
 
-## log-parser
+#### 01. Prerequisites
+The following procedures assumes that all of the OS-level configuration has been completed. They are:
 
-- code/log-parser/log-parser.py
+* [AWS Command Line Interface](https://aws.amazon.com/cli/)
+* Node.js 8.x
+* Python 3.x
 
-## reputation-lists-parser
+The AWS WAF Security Automations solution is developed with Node.js and Python for the microservices that run in AWS Lambda. The latest version has been tested with Node.js v8.10 and Python v3.7.
 
-- code/reputation-lists-parser/reputation-lists-parser.js
+#### 02. Clone AWS WAF Security Automations repository
+Clone the aws-waf-security-automations GitHub repository:
 
-## access-handler
+```
+git clone https://github.com/awslabs/aws-waf-security-automations.git
+```
 
-- code/access-handler/access-handler.py
+#### 03. Declare enviroment variables:
+```
+export AWS_REGION=<aws-region-code>
+export VERSION_CODE=<version-code>
+export DEPLOY_BUCKET=<source-bucket-base-name>
+```
+- **aws-region-code**: AWS region code. Ex: ```us-east-1```.
+- **version-code**: version of the package. EX: ```v2.2```.
+- **source-bucket-base-name**: Name for the S3 bucket location where the template will source the Lambda code from. The template will append ```-[aws-region-code]``` to this bucket name. For example: ```./build-s3-dist.sh solutions v2.2```, the template will then expect the source code to be located in the ```solutions-[aws-region-code]``` bucket.
 
-## custom-resource
+#### 04. Build the AWS WAF Security Automations solution for deployment:
+```
+cd ./aws-waf-security-automations/deployment
+chmod +x build-s3-dist.sh
+./build-s3-dist.sh $DEPLOY_BUCKET $VERSION_CODE
+```
 
-- code/custom-resource/custom-resource.py
+#### 05. Upload deployment assets to your Amazon S3 bucket:
+```
+aws s3 cp ./dist s3://$DEPLOY_BUCKET-$AWS_REGION/aws-waf-security-automations/latest --recursive --acl bucket-owner-full-control
+aws s3 cp ./dist s3://$DEPLOY_BUCKET-$AWS_REGION/aws-waf-security-automations/$VERSION_CODE --recursive --acl bucket-owner-full-control
+```
+
+#### 06. Deploy the AWS WAF Security Automations solution:
+* From your designated Amazon S3 bucket where you uploaded the deployment assets, copy the link location for the aws-waf-security-automations.template or aws-waf-security-automations-alb.template.
+* Using AWS CloudFormation, launch the AWS WAF Security Automations solution stack using the copied Amazon S3 link for the aws-waf-security-automations.template or aws-waf-security-automations-alb.template.
 
 ***
 
-Copyright 2016 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 Licensed under the Amazon Software License (the "License"). You may not use this file except in compliance with the License. A copy of the License is located at
 

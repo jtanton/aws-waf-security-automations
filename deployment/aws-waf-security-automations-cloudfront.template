@@ -1,0 +1,635 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  (SO0006-CloudFront) - AWS WAF Security Automations %%VERSION%%: This AWS CloudFormation template helps
+  you provision the AWS WAF Security Automations stack without worrying about creating and
+  configuring the underlying AWS infrastructure.
+
+  **WARNING** This template creates an AWS Lambda function, an AWS WAF Web ACL, an Amazon S3 bucket,
+  and an Amazon CloudWatch custom metric. You will be billed for the AWS resources used if you
+  create a stack from this template.
+
+  **NOTICE** Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved. Licensed under
+  the Amazon Software License (the License). You may not use this file except in compliance with the
+  License. A copy of the License is located at http://aws.amazon.com/asl/ or in the license file
+  accompanying this file. This file is distributed on an AS IS BASIS, WITHOUT WARRANTIES OR
+  CONDITIONS OF ANY KIND, express or implied. See the License for the specific language governing
+  permissions and limitations under the License.
+
+
+Parameters:
+  SqlInjectionProtectionParam:
+    Type: String
+  CrossSiteScriptingProtectionParam:
+    Type: String
+  ActivateHttpFloodProtectionParam:
+    Type: String
+  ActivateScannersProbesProtectionParam:
+    Type: String
+  ActivateReputationListsProtectionParam:
+    Type: String
+  ActivateBadBotProtectionParam:
+    Type: String
+  AccessLogBucket:
+    Type: String
+  WafApiType:
+    Type: String
+  WafArnPrefix:
+    Type: String
+  ParentStackName:
+    Type: String
+
+
+Conditions:
+  SqlInjectionProtectionActivated: !Equals
+    - !Ref SqlInjectionProtectionParam
+    - 'yes'
+
+  CrossSiteScriptingProtectionActivated: !Equals
+    - !Ref CrossSiteScriptingProtectionParam
+    - 'yes'
+
+  HttpFloodProtectionActivated: !Equals
+    - !Ref ActivateHttpFloodProtectionParam
+    - 'yes'
+
+  ScannersProbesProtectionActivated: !Equals
+    - !Ref ActivateScannersProbesProtectionParam
+    - 'yes'
+
+  ReputationListsProtectionActivated: !Equals
+    - !Ref ActivateReputationListsProtectionParam
+    - 'yes'
+
+  BadBotProtectionActivated: !Equals
+    - !Ref ActivateBadBotProtectionParam
+    - 'yes'
+
+  LogParserActivated: !Equals
+    - !Ref ActivateScannersProbesProtectionParam
+    - 'yes'
+
+
+Resources:
+  WAFWhitelistSet:
+    Type: 'AWS::WAF::IPSet'
+    Properties:
+      Name: !Join [' - ', [!Ref 'AWS::StackName', 'Whitelist Set']]
+
+  WAFBlacklistSet:
+    Type: 'AWS::WAF::IPSet'
+    Properties:
+      Name: !Join [' - ', [!Ref 'AWS::StackName', 'Blacklist Set']]
+
+  WAFScannersProbesSet:
+    Type: 'AWS::WAF::IPSet'
+    Condition: LogParserActivated
+    Properties:
+      Name: !Join [' - ', [!Ref 'AWS::StackName', 'Scanners & Probes Set']]
+
+  WAFReputationListsSet:
+    Type: 'AWS::WAF::IPSet'
+    Condition: ReputationListsProtectionActivated
+    Properties:
+      Name: !Join [' - ', [!Ref 'AWS::StackName', 'IP Reputation Lists Set']]
+
+  WAFBadBotSet:
+    Type: 'AWS::WAF::IPSet'
+    Condition: BadBotProtectionActivated
+    Properties:
+      Name: !Join [' - ', [!Ref 'AWS::StackName', 'IP Bad Bot Set']]
+
+  WAFSqlInjectionDetection:
+    Type: 'AWS::WAF::SqlInjectionMatchSet'
+    Condition: SqlInjectionProtectionActivated
+    Properties:
+      Name: !Join [' - ', [!Ref 'AWS::StackName', 'SQL injection Detection']]
+      SqlInjectionMatchTuples:
+        - FieldToMatch:
+            Type: QUERY_STRING
+          TextTransformation: URL_DECODE
+        - FieldToMatch:
+            Type: QUERY_STRING
+          TextTransformation: HTML_ENTITY_DECODE
+        - FieldToMatch:
+            Type: BODY
+          TextTransformation: URL_DECODE
+        - FieldToMatch:
+            Type: BODY
+          TextTransformation: HTML_ENTITY_DECODE
+        - FieldToMatch:
+            Type: URI
+          TextTransformation: URL_DECODE
+        - FieldToMatch:
+            Type: URI
+          TextTransformation: HTML_ENTITY_DECODE
+        - FieldToMatch:
+            Type: HEADER
+            Data: Cookie
+          TextTransformation: URL_DECODE
+        - FieldToMatch:
+            Type: HEADER
+            Data: Cookie
+          TextTransformation: HTML_ENTITY_DECODE
+        - FieldToMatch:
+            Type: HEADER
+            Data: Authorization
+          TextTransformation: URL_DECODE
+        - FieldToMatch:
+            Type: HEADER
+            Data: Authorization
+          TextTransformation: HTML_ENTITY_DECODE
+
+  WAFXssDetection:
+    Type: 'AWS::WAF::XssMatchSet'
+    Condition: CrossSiteScriptingProtectionActivated
+    Properties:
+      Name: !Join [' - ', [!Ref 'AWS::StackName', 'XSS Detection Detection']]
+      XssMatchTuples:
+        - FieldToMatch:
+            Type: QUERY_STRING
+          TextTransformation: URL_DECODE
+        - FieldToMatch:
+            Type: QUERY_STRING
+          TextTransformation: HTML_ENTITY_DECODE
+        - FieldToMatch:
+            Type: BODY
+          TextTransformation: URL_DECODE
+        - FieldToMatch:
+            Type: BODY
+          TextTransformation: HTML_ENTITY_DECODE
+        - FieldToMatch:
+            Type: URI
+          TextTransformation: URL_DECODE
+        - FieldToMatch:
+            Type: URI
+          TextTransformation: HTML_ENTITY_DECODE
+        - FieldToMatch:
+            Type: HEADER
+            Data: Cookie
+          TextTransformation: URL_DECODE
+        - FieldToMatch:
+            Type: HEADER
+            Data: Cookie
+          TextTransformation: HTML_ENTITY_DECODE
+
+  WAFWhitelistRule:
+    Type: 'AWS::WAF::Rule'
+    Properties:
+      Name: !Join [' - ', [!Ref 'AWS::StackName', 'Whitelist Rule']]
+      MetricName: !Join ['', [!Join ['', !Split ['-', !Ref 'AWS::StackName']], 'WhitelistRule']]
+      Predicates:
+        - DataId: !Ref WAFWhitelistSet
+          Negated: false
+          Type: IPMatch
+
+  WAFBlacklistRule:
+    Type: 'AWS::WAF::Rule'
+    Properties:
+      Name: !Join [' - ', [!Ref 'AWS::StackName', 'Blacklist Rule']]
+      MetricName: !Join ['', [!Join ['', !Split ['-', !Ref 'AWS::StackName']], 'BlacklistRule']]
+      Predicates:
+        - DataId: !Ref WAFBlacklistSet
+          Negated: false
+          Type: IPMatch
+
+  WAFScannersProbesRule:
+    Type: 'AWS::WAF::Rule'
+    Condition: LogParserActivated
+    Properties:
+      Name: !Join [' - ', [!Ref 'AWS::StackName', 'Scanners & Probes Rule']]
+      MetricName: !Join ['', [!Join ['', !Split ['-', !Ref 'AWS::StackName']], 'ScannersProbesRule']]
+      Predicates:
+        - DataId: !Ref WAFScannersProbesSet
+          Negated: false
+          Type: IPMatch
+
+  WAFIPReputationListsRule:
+    Type: 'AWS::WAF::Rule'
+    Condition: ReputationListsProtectionActivated
+    Properties:
+      Name: !Join [' - ', [!Ref 'AWS::StackName', 'WAF IP Reputation Lists Rule']]
+      MetricName: !Join ['', [!Join ['', !Split ['-', !Ref 'AWS::StackName']], 'IPReputationListsRule']]
+      Predicates:
+        - DataId: !Ref WAFReputationListsSet
+          Negated: false
+          Type: IPMatch
+
+  WAFBadBotRule:
+    Type: 'AWS::WAF::Rule'
+    Condition: BadBotProtectionActivated
+    Properties:
+      Name: !Join [' - ', [!Ref 'AWS::StackName', 'Bad Bot Rule']]
+      MetricName: !Join ['', [!Join ['', !Split ['-', !Ref 'AWS::StackName']], 'BadBotRule']]
+      Predicates:
+        - DataId: !Ref WAFBadBotSet
+          Negated: false
+          Type: IPMatch
+
+  WAFSqlInjectionRule:
+    Type: 'AWS::WAF::Rule'
+    Condition: SqlInjectionProtectionActivated
+    Properties:
+      Name: !Join [' - ', [!Ref 'AWS::StackName', 'SQL Injection Rule']]
+      MetricName: !Join ['', [!Join ['', !Split ['-', !Ref 'AWS::StackName']], 'SqlInjectionRule']]
+      Predicates:
+        - DataId: !Ref WAFSqlInjectionDetection
+          Negated: false
+          Type: SqlInjectionMatch
+
+  WAFXssRule:
+    Type: 'AWS::WAF::Rule'
+    Condition: CrossSiteScriptingProtectionActivated
+    Properties:
+      Name: !Join [' - ', [!Ref 'AWS::StackName', 'XSS Rule']]
+      MetricName: !Join ['', [!Join ['', !Split ['-', !Ref 'AWS::StackName']], 'XssRule']]
+      Predicates:
+        - DataId: !Ref WAFXssDetection
+          Negated: false
+          Type: XssMatch
+
+  WAFWebACL:
+    Type: 'AWS::WAF::WebACL'
+    Properties:
+      Name: !Ref 'AWS::StackName'
+      DefaultAction:
+        Type: ALLOW
+      MetricName: !Join ['', [!Join ['', !Split ['-', !Ref 'AWS::StackName']], 'MaliciousRequesters']]
+      Rules:
+        - Action:
+            Type: ALLOW
+          Priority: 10
+          RuleId: !Ref WAFWhitelistRule
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: 'F665'
+            reason: This this a blacklist webACL
+
+  LambdaRoleLogParser:
+    Type: 'AWS::IAM::Role'
+    Condition: LogParserActivated
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: '/'
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 's3:GetObject'
+                Resource:
+                  - !Join ['', ['arn:aws:s3:::', !Ref AccessLogBucket, '/*']]
+        - PolicyName: S3AccessPut
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 's3:PutObject'
+                Resource:
+                  - !Join ['', ['arn:aws:s3:::', !Ref AccessLogBucket, '/', !Ref ParentStackName, '.json']]
+        - PolicyName: WAFGetChangeToken
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action: !Join ['', [!Ref WafApiType, ':GetChangeToken']]
+                Resource:
+                  - '*'
+        - PolicyName: WAFGetAndUpdateIPSet
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - !Join ['', [!Ref WafApiType, ':GetIPSet']]
+                  - !Join ['', [!Ref WafApiType, ':UpdateIPSet']]
+                Resource:
+                  - !Join ['', [!Ref WafArnPrefix, !Ref 'AWS::AccountId', ':ipset/', !Ref WAFBlacklistSet]]
+                  - !Join ['', [!Ref WafArnPrefix, !Ref 'AWS::AccountId', ':ipset/', !Ref WAFScannersProbesSet]]
+        - PolicyName: LogsAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource:
+                  - !Join [':', ['arn:aws:logs', !Ref 'AWS::Region', !Ref 'AWS::AccountId', 'log-group:/aws/lambda/*']]
+        - PolicyName: CloudWatchAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 'cloudwatch:GetMetricStatistics'
+                Resource:
+                  - '*'
+
+  LambdaRoleReputationListsParser:
+    Type: 'AWS::IAM::Role'
+    Condition: ReputationListsProtectionActivated
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource:
+                  - !Join [':', ['arn:aws:logs', !Ref 'AWS::Region', !Ref 'AWS::AccountId', 'log-group:/aws/lambda/*']]
+        - PolicyName: 'WAFGetChangeToken'
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action: !Join ['', [!Ref WafApiType, ':GetChangeToken']]
+                Resource:
+                  - '*'
+        - PolicyName: WAFGetAndUpdateIPSet
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - !Join ['', [!Ref WafApiType, ':GetIPSet']]
+                  - !Join ['', [!Ref WafApiType, ':UpdateIPSet']]
+                Resource:
+                  - !Join ['', [!Ref WafArnPrefix, !Ref 'AWS::AccountId', ':ipset/', !Ref WAFReputationListsSet]]
+        - PolicyName: CloudFormationAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 'cloudformation:DescribeStacks'
+                Resource:
+                  - !Join ['', ['arn:aws:cloudformation:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':stack/', !Ref 'AWS::StackName', '/*']]
+        - PolicyName: CloudWatchAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 'cloudwatch:GetMetricStatistics'
+                Resource:
+                  - '*'
+
+  LambdaRoleBadBot:
+    Type: 'AWS::IAM::Role'
+    Condition: BadBotProtectionActivated
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: WAFGetChangeToken
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action: !Join ['', [!Ref WafApiType, ':GetChangeToken']]
+                Resource:
+                  - '*'
+        - PolicyName: WAFGetAndUpdateIPSet
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - !Join ['', [!Ref WafApiType, ':GetIPSet']]
+                  - !Join ['', [!Ref WafApiType, ':UpdateIPSet']]
+                Resource:
+                  - !Join ['', [!Ref WafArnPrefix, !Ref 'AWS::AccountId', ':ipset/', !Ref WAFBadBotSet]]
+        - PolicyName: LogsAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource:
+                  - !Join [':', ['arn:aws:logs', !Ref 'AWS::Region', !Ref 'AWS::AccountId', 'log-group:/aws/lambda/*']]
+        - PolicyName: 'CloudFormationAccess'
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 'cloudformation:DescribeStacks'
+                Resource:
+                  - !Join ['', ['arn:aws:cloudformation:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':stack/', !Ref 'AWS::StackName', '/*']]
+        - PolicyName: CloudWatchAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 'cloudwatch:GetMetricStatistics'
+                Resource:
+                  - '*'
+
+  LambdaRoleCustomResource:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: S3AccessGeneral
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:CreateBucket'
+                  - 's3:GetBucketNotification'
+                  - 's3:PutBucketNotification'
+                Resource:
+                  - !Join ['', ['arn:aws:s3:::*']]
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:GetBucketLocation'
+                  - 's3:GetObject'
+                  - 's3:ListBucket'
+                Resource:
+                  - !Join ['', ['arn:aws:s3:::', !Ref AccessLogBucket]]
+        - !If
+          - ReputationListsProtectionActivated
+          - PolicyName: LambdaAccess
+            PolicyDocument:
+              Version: 2012-10-17
+              Statement:
+                - Effect: Allow
+                  Action: 'lambda:InvokeFunction'
+                  Resource:
+                    - !Join [':', ['arn:aws:lambda', !Ref 'AWS::Region', !Ref 'AWS::AccountId', 'function:*']]
+          - !Ref 'AWS::NoValue'
+        - PolicyName: WAFAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - !Join ['', [!Ref WafApiType, ':GetWebACL']]
+                  - !Join ['', [!Ref WafApiType, ':UpdateWebACL']]
+                Resource:
+                  - !Join ['', [!Ref WafArnPrefix, !Ref 'AWS::AccountId', ':webacl/', !Ref WAFWebACL]]
+                  - !Join ['', [!Ref WafArnPrefix, !Ref 'AWS::AccountId', ':rule/*']]
+                  - !Join ['', [!Ref WafArnPrefix, !Ref 'AWS::AccountId', ':ratebasedrule/*']]
+        - PolicyName: 'WAFRuleAccess'
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - !Join ['', [!Ref WafApiType, ':GetRule']]
+                  - !Join ['', [!Ref WafApiType, ':GetIPSet']]
+                  - !Join ['', [!Ref WafApiType, ':UpdateIPSet']]
+                Resource:
+                  - !Join ['', [!Ref WafArnPrefix, !Ref 'AWS::AccountId', ':rule/*']]
+        - PolicyName: 'WAFIPSetAccess'
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - !Join ['', [!Ref WafApiType, ':GetIPSet']]
+                  - !Join ['', [!Ref WafApiType, ':UpdateIPSet']]
+                Resource:
+                  - !Join ['', [!Ref WafArnPrefix, !Ref 'AWS::AccountId', ':ipset/*']]
+        - PolicyName: 'WAFRateBasedRuleAccess'
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - !Join ['', [!Ref WafApiType, ':GetRateBasedRule']]
+                  - !Join ['', [!Ref WafApiType, ':CreateRateBasedRule']]
+                  - !Join ['', [!Ref WafApiType, ':UpdateRateBasedRule']]
+                  - !Join ['', [!Ref WafApiType, ':DeleteRateBasedRule']]
+                  - !Join ['', [!Ref WafApiType, ':ListRateBasedRules']]
+                  - !Join ['', [!Ref WafApiType, ':UpdateWebACL']]
+                Resource:
+                  - !Join ['', [!Ref WafArnPrefix, !Ref 'AWS::AccountId', ':ratebasedrule/*']]
+        - PolicyName: CloudFormationAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 'cloudformation:DescribeStacks'
+                Resource:
+                  - !Join ['', ['arn:aws:cloudformation:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':stack/', !Ref 'AWS::StackName', '/*']]
+        - PolicyName: WAFGetChangeToken
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action: !Join ['', [!Ref WafApiType, ':GetChangeToken']]
+                Resource:
+                  - '*'
+        - PolicyName: LogsAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource:
+                  - !Join [':', ['arn:aws:logs', !Ref 'AWS::Region', !Ref 'AWS::AccountId', 'log-group:/aws/lambda/*']]
+
+Outputs:
+  WAFWhitelistSet:
+    Value: !Ref WAFWhitelistSet
+
+  WAFBlacklistSet:
+    Value: !Ref WAFBlacklistSet
+
+  WAFScannersProbesSet:
+    Value: !Ref WAFScannersProbesSet
+    Condition: LogParserActivated
+
+  WAFReputationListsSet:
+    Value: !Ref WAFReputationListsSet
+    Condition: ReputationListsProtectionActivated
+
+  WAFBadBotSet:
+    Value: !Ref WAFBadBotSet
+    Condition: BadBotProtectionActivated
+
+  WAFWhitelistRule:
+    Value: !Ref WAFWhitelistRule
+
+  WAFBlacklistRule:
+    Value: !Ref WAFBlacklistRule
+
+  WAFScannersProbesRule:
+    Value: !Ref WAFScannersProbesRule
+    Condition: LogParserActivated
+
+  WAFIPReputationListsRule:
+    Value: !Ref WAFIPReputationListsRule
+    Condition: ReputationListsProtectionActivated
+
+  WAFBadBotRule:
+    Value: !Ref WAFBadBotRule
+    Condition: BadBotProtectionActivated
+
+  WAFSqlInjectionRule:
+    Value: !Ref WAFSqlInjectionRule
+    Condition: SqlInjectionProtectionActivated
+
+  WAFXssRule:
+    Value: !Ref WAFXssRule
+    Condition: CrossSiteScriptingProtectionActivated
+
+  WAFWebACL:
+    Value: !Ref WAFWebACL
+
+  WAFWebACLMetricName:
+    Value: !Join ['', [!Join ['', !Split ['-', !Ref 'AWS::StackName']], 'MaliciousRequesters']]
+
+  LambdaRoleLogParserArn:
+    Value: !GetAtt LambdaRoleLogParser.Arn
+    Condition: LogParserActivated
+
+  LambdaRoleReputationListsParserArn:
+    Value: !GetAtt LambdaRoleReputationListsParser.Arn
+    Condition: ReputationListsProtectionActivated
+
+  LambdaRoleBadBotArn:
+    Value: !GetAtt LambdaRoleBadBot.Arn
+    Condition: BadBotProtectionActivated
+
+  LambdaRoleCustomResourceArn:
+    Value: !GetAtt LambdaRoleCustomResource.Arn
